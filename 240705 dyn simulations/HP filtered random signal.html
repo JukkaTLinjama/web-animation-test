@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Continuous LP and HP Filtering with Frequency Control</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        #ball {
+            width: 50px;
+            height: 50px;
+            background-color: red;
+            border-radius: 50%;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            width: 300px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        #stepCounter {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 16px;
+            background-color: white;
+            padding: 5px;
+            border-radius: 5px;
+            box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.3);
+        }
+        #plots {
+            position: fixed;
+            top: 50px;
+            right: 10px;
+            width: 400px;
+            height: 450px;
+        }
+        canvas {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <label for="lpTimeConstant">Low-Pass Time Constant (τ): <span id="lpTimeConstantValue">0.1</span></label>
+    <input type="range" id="lpTimeConstant" min="0.05" max="1" step="0.01" value="0.1">
+    
+    <label for="hpTimeConstant">High-Pass Time Constant (τ): <span id="hpTimeConstantValue">0.1</span></label>
+    <input type="range" id="hpTimeConstant" min="0.05" max="1" step="0.01" value="0.1">
+
+    <label for="inputFrequency">Input Frequency (Hz): <span id="inputFrequencyValue">1</span></label>
+    <input type="range" id="inputFrequency" min="0.1" max="5" step="0.1" value="1">
+</div>
+
+<div id="ball"></div>
+<div id="stepCounter">Step: 0</div>
+<div id="plots">
+    <canvas id="inputCanvas"></canvas>
+    <canvas id="outputCanvas"></canvas>
+</div>
+
+<script>
+    const ball = document.getElementById('ball');
+    const lpTimeConstantSlider = document.getElementById('lpTimeConstant');
+    const hpTimeConstantSlider = document.getElementById('hpTimeConstant');
+    const inputFrequencySlider = document.getElementById('inputFrequency');
+    const lpTimeConstantValue = document.getElementById('lpTimeConstantValue');
+    const hpTimeConstantValue = document.getElementById('hpTimeConstantValue');
+    const inputFrequencyValue = document.getElementById('inputFrequencyValue');
+    const stepCounter = document.getElementById('stepCounter');
+    
+    const timeStep = 20; // 20 ms step size
+    const bufferSize = 100;
+    let buffer = new Array(bufferSize).fill(0); // Initialize the ring buffer with zeros
+    let inputSignal = [];
+    let outputSignal = [];
+    let writeIndex = 0;
+    let step = 0;
+    let inputFrequency = 1; // Default frequency of 1 Hz
+    
+    let previousLPValue = 0; // Initialize the previous value for the LP filter
+    let previousHPInputValue = 0; // Initialize the previous input value for the HP filter
+    let previousHPValue = 0; // Initialize the previous output value for the HP filter
+
+    lpTimeConstantSlider.addEventListener('input', () => {
+        lpTimeConstantValue.textContent = lpTimeConstantSlider.value;
+    });
+
+    hpTimeConstantSlider.addEventListener('input', () => {
+        hpTimeConstantValue.textContent = hpTimeConstantSlider.value;
+    });
+
+    inputFrequencySlider.addEventListener('input', () => {
+        inputFrequency = parseFloat(inputFrequencySlider.value);
+        inputFrequencyValue.textContent = inputFrequencySlider.value;
+    });
+
+    function generateNextValue(step) {
+        // Generate a sinusoidal input signal with added noise
+        return 100 + 100 * Math.sin(2 * Math.PI * inputFrequency * step * timeStep / 1000) + (Math.random() * 20 - 10);
+    }
+
+    function updateBuffer() {
+        const nextValue = generateNextValue(step);
+        buffer[writeIndex] = nextValue;
+        inputSignal.push(nextValue); // Store the input signal for plotting
+        writeIndex = (writeIndex + 1) % bufferSize; // Move to the next position in the ring buffer
+        step++;
+    }
+
+    function applyLowPassFilter(currentValue, timeConstant) {
+        const alpha = timeStep / (timeConstant * 1000 + timeStep); // Calculate alpha
+        const filteredValue = previousLPValue + alpha * (currentValue - previousLPValue);
+        previousLPValue = filteredValue; // Update previous value for the next iteration
+        return filteredValue;
+    }
+
+    function applyHighPassFilter(currentValue, timeConstant) {
+        const alpha = timeStep / (timeConstant * 1000 + timeStep); // Calculate alpha
+        const filteredValue = alpha * (previousHPValue + currentValue - previousHPInputValue);
+        previousHPInputValue = currentValue; // Update previous input value for the next iteration
+        previousHPValue = filteredValue; // Update previous output value for the next iteration
+        return filteredValue;
+    }
+
+    function plotSignals() {
+        const inputCanvas = document.getElementById('inputCanvas');
+        const outputCanvas = document.getElementById('outputCanvas');
+        const inputCtx = inputCanvas.getContext('2d');
+        const outputCtx = outputCanvas.getContext('2d');
+
+        // Clear previous plots
+        inputCtx.clearRect(0, 0, inputCanvas.width, inputCanvas.height);
+        outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+
+        // Plot input signal
+        inputCtx.beginPath();
+        inputSignal.forEach((value, index) => {
+            const x = (index / bufferSize) * inputCanvas.width;
+            const y = (1 - (value + 200) / 400) * inputCanvas.height;
+            if (index === 0) {
+                inputCtx.moveTo(x, y);
+            } else {
+                inputCtx.lineTo(x, y);
+            }
+        });
+        inputCtx.strokeStyle = 'blue';
+        inputCtx.stroke();
+
+        // Plot output signal
+        outputCtx.beginPath();
+        outputSignal.forEach((value, index) => {
+            const x = (index / bufferSize) * outputCanvas.width;
+            const y = (1 - (value + 200) / 400) * outputCanvas.height;
+            if (index === 0) {
+                outputCtx.moveTo(x, y);
+            } else {
+                outputCtx.lineTo(x, y);
+            }
+        });
+        outputCtx.strokeStyle = 'green';
+        outputCtx.stroke();
+
+        // Add axes and labels to the plots
+        inputCtx.beginPath();
+        inputCtx.moveTo(30, 0);
+        inputCtx.lineTo(30, inputCanvas.height);
+        inputCtx.moveTo(0, inputCanvas.height - 20);
+        inputCtx.lineTo(inputCanvas.width, inputCanvas.height - 20);
+        inputCtx.strokeStyle = 'black';
+        inputCtx.stroke();
+
+        outputCtx.beginPath();
+        outputCtx.moveTo(30, 0);
+        outputCtx.lineTo(30, outputCanvas.height);
+        outputCtx.moveTo(0, outputCanvas.height - 20);
+        outputCtx.lineTo(outputCanvas.width, outputCanvas.height - 20);
+        outputCtx.strokeStyle = 'black';
+        outputCtx.stroke();
+
+        // Add labels
+        inputCtx.font = '12px Arial';
+        inputCtx.fillStyle = 'black';
+        inputCtx.fillText('Amplitude', 5, 15);
+        inputCtx.fillText('Time', inputCanvas.width - 30, inputCanvas.height - 5);
+
+        outputCtx.font = '12px Arial';
+        outputCtx.fillStyle = 'black';
+        outputCtx.fillText('Amplitude', 5, 15);
+        outputCtx.fillText('Time', outputCanvas.width - 30, outputCanvas.height - 5);
+    }
+
+    function animateBall() {
+        function moveBall() {
+            updateBuffer(); // Update the ring buffer with a new value
+
+            // Get the current time constants from the sliders
+            const lpTimeConstant = parseFloat(lpTimeConstantSlider.value);
+            const hpTimeConstant = parseFloat(hpTimeConstantSlider.value);
+
+            // Apply the low-pass and high-pass filters to the current buffer value
+            const currentIndex = (writeIndex - 1 + bufferSize) % bufferSize; // Get the latest value index
+            const lpFilteredValue = applyLowPassFilter(buffer[currentIndex], lpTimeConstant);
+            const hpFilteredValue = applyHighPassFilter(buffer[currentIndex], hpTimeConstant);
+
+            // Combine the LP and HP filtered values for the final output
+            let combinedValue = lpFilteredValue + hpFilteredValue;
+            outputSignal.push(combinedValue); // Store the output signal for plotting
+
+            ball.style.top = combinedValue + 'px';
+
+            // Update the step counter
+            stepCounter.textContent = `Step: ${step}`;
+
+            if (step % 100 === 0) {
+                plotSignals(); // Plot the signals after every 100 steps
+                inputSignal = [];
+                outputSignal = [];
+            }
+
+            setTimeout(moveBall, timeStep);
+        }
+
+        moveBall();
+    }
+
+    // Start the animation
+    animateBall();
+</script>
+
+</body>
+</html>

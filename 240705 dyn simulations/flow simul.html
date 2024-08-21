@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Pass Filtered Convolution</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        canvas {
+            width: 100%;
+            height: 400px;
+        }
+        .container {
+            width: 90%;
+            margin: auto;
+        }
+        button {
+            display: block;
+            margin: 20px auto;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .slider-container {
+            margin: 20px auto;
+            text-align: center;
+        }
+        .slider {
+            width: 80%;
+        }
+        .slider-label {
+            font-size: 16px;
+        }
+        .description {
+            font-size: 12px;
+            color: #555;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>High-Pass Filtered Convolution Plot</h1>
+        
+        <canvas id="scatterPlot"></canvas>
+        <canvas id="convolutionPlot"></canvas>
+        <canvas id="convolutionShapePlot"></canvas>
+        
+        <div class="slider-container">
+            <label for="highPassSlider" class="slider-label">High-Pass Frequency (0.01 to 0.2 cycles/step): <span id="highPassValue">0.1</span></label>
+            <input type="range" id="highPassSlider" class="slider" min="0.01" max="0.2" step="0.01" value="0.1">
+            <div class="description">Controls the high-pass cutoff frequency of the filter.</div>
+        </div>
+        
+        <button onclick="generateRandomWalk()">Generate Random Walk</button>
+    </div>
+
+    <script>
+        let scatterChart, convolutionChart, convolutionShapeChart;
+        let walkX = [];
+        const windowSize = 200; // Rolling window size
+        const kernelLength = 40; // Fixed length for the convolution kernel
+
+        /**
+         * Generates a new random value based on the last value in the walkX array.
+         * @returns {number} The generated random value.
+         */
+        function generateRandomValue() {
+            return walkX.length === 0 ? 0 : walkX[walkX.length - 1] + (Math.random() - 0.5);
+        }
+
+        /**
+         * Creates a high-pass filter kernel with an adjustable cutoff frequency.
+         * @param {number[]} values - The array of input values.
+         * @param {number} highPassFreq - The high-pass cutoff frequency in cycles/step.
+         * @returns {number[]} The convolved values.
+         */
+        function highPassFilteredConvolution(values, highPassFreq) {
+            const totalSteps = values.length;
+            const kernel = [];
+            const nyquist = 0.5;
+
+            // Create high-pass filter kernel
+            for (let i = 0; i < kernelLength; i++) {
+                const freq = i / kernelLength;
+                if (freq >= highPassFreq) {
+                    kernel.push(1 - Math.sin(2 * Math.PI * freq) / (2 * Math.PI * freq));
+                } else {
+                    kernel.push(0);
+                }
+            }
+
+            // Normalize kernel
+            const sumKernel = kernel.reduce((a, b) => a + b, 0);
+            const normalizedKernel = kernel.map(value => value / sumKernel);
+
+            // Perform convolution
+            const convolved = [];
+            for (let i = 0; i < totalSteps; i++) {
+                let convSum = 0;
+                for (let j = 0; j < kernelLength; j++) {
+                    if (i - j >= 0) {
+                        convSum += values[i - j] * normalizedKernel[j];
+                    }
+                }
+                convolved.push(convSum);
+            }
+            return convolved;
+        }
+
+        /**
+         * Plots the shape of the high-pass filter kernel.
+         * @param {number} highPassFreq - The high-pass cutoff frequency in cycles/step.
+         */
+        function plotConvolutionShape(highPassFreq) {
+            const kernel = [];
+            const nyquist = 0.5;
+
+            // Create high-pass filter kernel
+            for (let i = 0; i < kernelLength; i++) {
+                const freq = i / kernelLength;
+                if (freq >= highPassFreq) {
+                    kernel.push(1 - Math.sin(2 * Math.PI * freq) / (2 * Math.PI * freq));
+                } else {
+                    kernel.push(0);
+                }
+            }
+            const sumKernel = kernel.reduce((a, b) => a + b, 0);
+            const normalizedKernel = kernel.map(value => value / sumKernel);
+
+            const shapeCtx = document.getElementById('convolutionShapePlot').getContext('2d');
+            if (convolutionShapeChart) convolutionShapeChart.destroy();
+            convolutionShapeChart = new Chart(shapeCtx, {
+                type: 'line',
+                data: {
+                    labels: kernel.map((_, i) => i),
+                    datasets: [{
+                        label: 'High-Pass Filter Kernel',
+                        data: kernel.map((value, i) => ({ x: i, y: value })),
+                        borderColor: 'rgba(153, 102, 255, 1)',
+                        fill: false
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: { type: 'linear', position: 'bottom' },
+                        y: { type: 'linear' }
+                    }
+                }
+            });
+        }
+
+        /**
+         * Updates all plots based on current walkX and filter parameters.
+         */
+        function updatePlots() {
+            const highPassFreq = parseFloat(document.getElementById('highPassSlider').value);
+
+            const convX = highPassFilteredConvolution(walkX, highPassFreq);
+
+            if (scatterChart) scatterChart.destroy();
+            if (convolutionChart) convolutionChart.destroy();
+
+            // Scatter Plot
+            const scatterCtx = document.getElementById('scatterPlot').getContext('2d');
+            scatterChart = new Chart(scatterCtx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Random Walk X',
+                        data: walkX.map((x, i) => ({ x: i, y: x })),
+                        backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1,
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: { type: 'linear', position: 'bottom' },
+                        y: { type: 'linear' }
+                    }
+                }
+            });
+
+            // Convolution Plot
+            const convCtx = document.getElementById('convolutionPlot').getContext('2d');
+            convolutionChart = new Chart(convCtx, {
+                type: 'line',
+                data: {
+                    labels: walkX.map((_, i) => i),
+                    datasets: [{
+                        label: 'Convolution of X',
+                        data: convX.map((value, i) => ({ x: i, y: value })),
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        fill: false,
+                    }]
+                },
+                options: {
+                    scales: {
+                        x: { type: 'linear', position: 'bottom' },
+                        y: { type: 'linear' }
+                    }
+                }
+            });
+
+            // Plot convolution shape
+            plotConvolutionShape(highPassFreq);
+        }
+
+        /**
+         * Generates a random walk and updates plots.
+         */
+        function generateRandomWalk() {
+            // Initialize walkX with the first value
+            walkX = [0];
+            
+            // Generate random walk data
+            for (let i = 1; i < windowSize; i++) {
+                walkX.push(generateRandomValue());
+            }
+
+            // Update the plots
+            updatePlots();
+        }
+
+        // Update slider values on change
+        document.getElementById('highPassSlider').addEventListener('input', function () {
+            document.getElementById('highPassValue').textContent = this.value;
+            updatePlots();
+        });
+
+        // Initial plot of the convolution kernel shape
+        plotConvolutionShape(parseFloat(document.getElementById('highPassSlider').value));
+    </script>
+</body>
+</html>

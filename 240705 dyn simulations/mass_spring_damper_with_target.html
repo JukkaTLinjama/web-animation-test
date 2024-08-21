@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nonlinear Modulation with Real-time X-Y Scatter Plot</title>
+    <style>
+        #animatedElement {
+            width: 50px;
+            height: 50px;
+            background-color: blue;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #targetElement {
+            width: 10px;
+            height: 10px;
+            background-color: red;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .slider-container {
+            margin-bottom: 10px;
+        }
+
+        #plot {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 5;
+            background-color: white;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div id="animatedElement"></div>
+    <div id="targetElement"></div>
+    <div id="controls">
+        <div class="slider-container">
+            <label for="ampModFreq">Amplitude Modulation Frequency (Hz): </label>
+            <input type="range" id="ampModFreq" min="0.1" max="5" step="0.1" value="0.5">
+            <span id="ampModFreqValue">0.5</span>
+        </div>
+        <div class="slider-container">
+            <label for="freqModFreq">Frequency Modulation Frequency (Hz): </label>
+            <input type="range" id="freqModFreq" min="0.1" max="5" step="0.1" value="0.5">
+            <span id="freqModFreqValue">0.5</span>
+        </div>
+        <div class="slider-container">
+            <label for="modulationIndex">Modulation Index: </label>
+            <input type="range" id="modulationIndex" min="0" max="0.5" step="0.01" value="0.25">
+            <span id="modulationIndexValue">0.25</span>
+        </div>
+    </div>
+
+    <canvas id="plot" width="400" height="200"></canvas>
+
+    <script>
+        /*
+         * This script simulates the motion of a mass-spring-damper system with nonlinear modulation.
+         * 
+         * - The natural frequency of the system is set to 0.5 Hz.
+         * - The spring constant and damping factor are calculated based on this frequency.
+         * - The target position for the mass is modulated by nonlinear amplitude and frequency modulation.
+         * - The modulation is visualized as an x-y scatter plot where x = frequency modulation and y = amplitude modulation.
+         * - Sliders allow interactive control of the amplitude modulation frequency, frequency modulation frequency, and modulation index.
+         * https://chatgpt.com/share/abea9295-a2f6-4932-8c0f-55ed56599027
+         * JukkaTLinjama 20240821    /Users/jukkal2021/Python_dev/graphics/240611 universe scales/240705 dyn simulations/mass_spring_damper_with_target.html
+         */
+
+        // Physics parameters
+        const mass = 1.0; // kg
+        const naturalFrequency = 0.5; // Hz
+        const springConstant = (2 * Math.PI * naturalFrequency) ** 2 * mass; // N/m
+        const criticalDamping = 2 * Math.sqrt(springConstant * mass); // Critical damping
+        let dampingFactor = 0.3 * criticalDamping; // Default to 30% of critical damping
+
+        // Animation settings
+        const frameRate = 50; // 50 Hz
+        const dt = 1 / frameRate;
+
+        const sequenceLength = 500; // Number of frames (reduced length)
+
+        // Initial modulation parameters
+        let ampModFreq = 0.5; // Amplitude modulation frequency
+        let freqModFreq = 0.5; // Frequency modulation frequency
+        let modulationIndex = 0.25; // Modulation index
+
+        // Canvas for plotting
+        const plotCanvas = document.getElementById('plot');
+        const plotCtx = plotCanvas.getContext('2d');
+        const plotWidth = plotCanvas.width;
+        const plotHeight = plotCanvas.height;
+
+        // Generate sequences for X and Y positions
+        function generateSequence(length, dt, ampModFreq, freqModFreq, modulationIndex) {
+            const baseFrequency = naturalFrequency; // Match the natural frequency
+            const amplitude = 100; // Scaled to 100 pixels for visualization
+            const sequence = [];
+
+            for (let i = 0; i < length; i++) {
+                const time = i * dt;
+                const frequencyModulation = Math.sin(2 * Math.PI * freqModFreq * time);
+                const modulatedFrequency = baseFrequency * Math.pow(1 + modulationIndex * frequencyModulation, 3);
+                const sineWave = Math.sin(2 * Math.PI * modulatedFrequency * time);
+                const amplitudeModulation = Math.pow(1 + modulationIndex * Math.sin(2 * Math.PI * ampModFreq * time), 3);
+                const value = amplitude * amplitudeModulation * sineWave;
+                sequence.push({ value, amplitudeModulation, frequencyModulation: modulatedFrequency });
+            }
+
+            return sequence;
+        }
+
+        let sequenceX = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
+        let sequenceY = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
+
+        const element = document.getElementById('animatedElement');
+        const targetElement = document.getElementById('targetElement');
+        const ampModFreqSlider = document.getElementById('ampModFreq');
+        const freqModFreqSlider = document.getElementById('freqModFreq');
+        const modulationIndexSlider = document.getElementById('modulationIndex');
+        const ampModFreqValue = document.getElementById('ampModFreqValue');
+        const freqModFreqValue = document.getElementById('freqModFreqValue');
+        const modulationIndexValue = document.getElementById('modulationIndexValue');
+        
+        let posX = window.innerWidth / 2;
+        let posY = window.innerHeight / 2;
+
+        let velocityX = 0;
+        let velocityY = 0;
+
+        let frame = 0;
+
+        function updateElementPosition(targetX, targetY) {
+            // Spring force = -k * displacement
+            const forceX = -springConstant * (posX - targetX);
+            const forceY = -springConstant * (posY - targetY);
+
+            // Damping force = -dampingFactor * velocity
+            const dampingX = -dampingFactor * velocityX;
+            const dampingY = -dampingFactor * velocityY;
+
+            // Net force = spring force + damping force
+            const netForceX = forceX + dampingX;
+            const netForceY = forceY + dampingY;
+
+            // Acceleration = F / m
+            const accelerationX = netForceX / mass;
+            const accelerationY = netForceY / mass;
+
+            // Update velocity and position using simple Euler integration
+            velocityX += accelerationX * dt;
+            velocityY += accelerationY * dt;
+
+            posX += velocityX * dt;
+            posY += velocityY * dt;
+
+            // Ensure the element stays within the viewport bounds
+            posX = Math.max(0, Math.min(window.innerWidth - 50, posX));
+            posY = Math.max(0, Math.min(window.innerHeight - 50, posY));
+
+            // Update the position of the animated element
+            element.style.left = `${posX}px`;
+            element.style.top = `${posY}px`;
+
+            // Update the position of the target element
+            targetElement.style.left = `${targetX}px`;
+            targetElement.style.top = `${targetY}px`;
+        }
+
+        function drawPlot(amplitudeModulation, frequencyModulation) {
+            // Clear the canvas
+            plotCtx.clearRect(0, 0, plotWidth, plotHeight);
+
+            // Convert modulation values to plot coordinates
+            const x = (frequencyModulation / (naturalFrequency * 2)) * plotWidth;
+            const y = plotHeight - (amplitudeModulation / 8) * plotHeight;
+
+            // Draw the scatter point
+            plotCtx.beginPath();
+            plotCtx.arc(x, y, 3, 0, 2 * Math.PI);
+            plotCtx.fillStyle = 'blue';
+            plotCtx.fill();
+        }
+
+        function animate() {
+            if (frame < sequenceLength) {
+                const targetX = window.innerWidth / 2 + sequenceX[frame].value;
+                const targetY = window.innerHeight / 2 + sequenceY[frame].value;
+
+                updateElementPosition(targetX, targetY);
+
+                // Draw scatter plot
+                drawPlot(sequenceX[frame].amplitudeModulation, sequenceX[frame].frequencyModulation);
+
+                frame++;
+                requestAnimationFrame(animate);
+            } else {
+                frame = 0; // Loop the sequence
+                sequenceX = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
+                sequenceY = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
+                requestAnimationFrame(animate);
+            }
+        }
+
+        // Update modulation frequencies and index based on slider input
+        ampModFreqSlider.addEventListener('input', () => {
+            ampModFreq = parseFloat(ampModFreqSlider.value);
+            ampModFreqValue.textContent = ampModFreq.toFixed(1);
+        });
+
+        freqModFreqSlider.addEventListener('input', () => {
+            freqModFreq = parseFloat(freqModFreqSlider.value);
+            freqModFreqValue.textContent = freqModFreq.toFixed(1);
+        });
+
+        modulationIndexSlider.addEventListener('input', () => {
+            modulationIndex = parseFloat(modulationIndexSlider.value);
+            modulationIndexValue.textContent = modulationIndex.toFixed(2);
+        });
+
+        animate();
+    </script>
+</body>
+</html>

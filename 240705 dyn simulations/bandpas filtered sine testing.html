@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corrected Band-Pass Filtering with Debugging Information</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        #ball {
+            width: 50px;
+            height: 50px;
+            background-color: red;
+            border-radius: 50%;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            width: 300px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        #stepCounter {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 16px;
+            background-color: white;
+            padding: 5px;
+            border-radius: 5px;
+            box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.3);
+        }
+        #plots {
+            position: fixed;
+            top: 50px;
+            right: 10px;
+            width: 400px;
+            height: 450px;
+        }
+        canvas {
+            width: 100%;
+            height: 200px;
+            margin-bottom: 10px;
+        }
+        #explanation {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            max-width: 400px;
+            font-size: 14px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.3);
+        }
+        #paramsTable {
+            position: fixed;
+            bottom: 150px;
+            left: 10px;
+            max-width: 400px;
+            font-size: 14px;
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0px 0px 5px rgba(0, 0, 0, 0.3);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <label for="inputFrequency">Input Frequency (Hz): <span id="inputFrequencyValue">1</span></label>
+    <input type="range" id="inputFrequency" min="0.1" max="5" step="0.1" value="1">
+
+    <label for="bpCenterFrequency">Band-Pass Center Frequency (Hz): <span id="bpCenterFrequencyValue">1</span></label>
+    <input type="range" id="bpCenterFrequency" min="0.1" max="5" step="0.1" value="1">
+
+    <label for="qFactor">Q Factor: <span id="qFactorValue">1</span></label>
+    <input type="range" id="qFactor" min="0.1" max="10" step="0.1" value="1">
+</div>
+
+<div id="ball"></div>
+<div id="stepCounter">Step: 0</div>
+<div id="plots">
+    <canvas id="combinedCanvas"></canvas>
+</div>
+
+<div id="explanation">
+    <strong>Band-Pass Filter (Resonator) Theory:</strong>
+    <p>
+        The band-pass filter is a second-order resonator, characterized by the following parameters:
+    </p>
+    <ul>
+        <li><strong>Center Frequency (\( f_0 \)):</strong> The frequency at which the filter is most responsive. It passes frequencies near \( f_0 \) and attenuates frequencies farther away.</li>
+        <li><strong>Q Factor (\( Q \)):</strong> Determines the sharpness of the resonance. A higher \( Q \) results in a narrower bandwidth, while a lower \( Q \) results in a broader passband.</li>
+        <li><strong>Input Frequency:</strong> The frequency of the input signal. The filter will pass frequencies near \( f_0 \) and attenuate those farther away.</li>
+    </ul>
+    <p>The filter is implemented using the difference equation:</p>
+    <p>\( y[n] = \frac{b_0}{a_0} \cdot x[n] + \frac{b_1}{a_0} \cdot x[n-1] + \frac{b_2}{a_0} \cdot x[n-2] - \frac{a_1}{a_0} \cdot y[n-1] - \frac{a_2}{a_0} \cdot y[n-2] \)</p>
+    <p>Where the coefficients \( b_0 \), \( b_1 \), \( b_2 \), \( a_0 \), \( a_1 \), and \( a_2 \) are calculated based on the center frequency and Q factor.</p>
+</div>
+
+<div id="paramsTable">
+    <table>
+        <thead>
+            <tr>
+                <th>Parameter</th>
+                <th>Value</th>
+            </tr>
+        </thead>
+        <tbody id="paramsBody">
+            <!-- Parameter values will be dynamically inserted here -->
+        </tbody>
+    </table>
+</div>
+
+<script>
+    const ball = document.getElementById('ball');
+    const inputFrequencySlider = document.getElementById('inputFrequency');
+    const bpCenterFrequencySlider = document.getElementById('bpCenterFrequency');
+    const qFactorSlider = document.getElementById('qFactor');
+    const inputFrequencyValue = document.getElementById('inputFrequencyValue');
+    const bpCenterFrequencyValue = document.getElementById('bpCenterFrequencyValue');
+    const qFactorValue = document.getElementById('qFactorValue');
+    const stepCounter = document.getElementById('stepCounter');
+    const paramsBody = document.getElementById('paramsBody');
+    
+    const timeStep = 20; // 20 ms step size
+    const bufferSize = 100;
+    let buffer = new Array(bufferSize).fill(0); // Initialize the ring buffer with zeros
+    let inputSignal = [];
+    let outputSignal = [];
+    let writeIndex = 0;
+    let step = 0;
+    let inputFrequency = 1; // Default frequency of 1 Hz
+    let bpCenterFrequency = 1; // Default band-pass center frequency of 1 Hz
+    let qFactor = 1; // Default Q factor
+    
+    let bpOutput1 = 0; // State variable for the band-pass filter
+    let bpOutput2 = 0; // State variable for the band-pass filter
+
+    inputFrequencySlider.addEventListener('input', () => {
+        inputFrequency = parseFloat(inputFrequencySlider.value);
+        inputFrequencyValue.textContent = inputFrequencySlider.value;
+        updateParamsTable();
+    });
+
+    bpCenterFrequencySlider.addEventListener('input', () => {
+        bpCenterFrequency = parseFloat(bpCenterFrequencySlider.value);
+        bpCenterFrequencyValue.textContent = bpCenterFrequencySlider.value;
+        updateParamsTable();
+    });
+
+    qFactorSlider.addEventListener('input', () => {
+        qFactor = parseFloat(qFactorSlider.value);
+        qFactorValue.textContent = qFactorSlider.value;
+        updateParamsTable();
+    });
+
+    function generateNextValue(step) {
+        // Generate a sinusoidal input signal with added noise
+        return 100 + 100 * Math.sin(2 * Math.PI * inputFrequency * step * timeStep / 1000) + (Math.random() * 20 - 10);
+    }
+
+    function updateBuffer() {
+        const nextValue = generateNextValue(step);
+        buffer[writeIndex] = nextValue;
+        inputSignal.push(nextValue); // Store the input signal for plotting
+        writeIndex = (writeIndex + 1) % bufferSize; // Move to the next position in the ring buffer
+        step++;
+    }
+
+    function applyBandPassFilter(currentValue, centerFrequency, qFactor) {
+        const omega0 = 2 * Math.PI * centerFrequency * timeStep / 1000;
+        const alpha = Math.sin(omega0) / (2 * qFactor);
+
+        const b0 = alpha;
+        const b1 = 0;
+        const b2 = -alpha;
+        const a0 = 1 + alpha;
+        const a1 = -2 * Math.cos(omega0);
+        const a2 = 1 - alpha;
+
+        const bpValue = (b0 / a0) * currentValue + (b1 / a0) * bpOutput1 + (b2 / a0) * bpOutput2 - (a1 / a0) * bpOutput1 - (a2 / a0) * bpOutput2;
+        bpOutput2 = bpOutput1;
+        bpOutput1 = bpValue;
+
+        return bpValue;
+    }
+
+    function plotSignals() {
+        const combinedCanvas = document.getElementById('combinedCanvas');
+        const combinedCtx = combinedCanvas.getContext('2d');
+
+        // Clear previous plots
+        combinedCtx.clearRect(0, 0, combinedCanvas.width, combinedCanvas.height);
+
+        // Plot input signal
+        combinedCtx.beginPath();
+        inputSignal.forEach((value, index) => {
+            const x = (index / bufferSize) * combinedCanvas.width;
+            const y = (1 - (value + 200) / 400) * combinedCanvas.height;
+            if (index === 0) {
+                combinedCtx.moveTo(x, y);
+            } else {
+                combinedCtx.lineTo(x, y);
+            }
+        });
+        combinedCtx.strokeStyle = 'blue';
+        combinedCtx.stroke();
+
+        // Plot output signal
+        combinedCtx.beginPath();
+        outputSignal.forEach((value, index) => {
+            const x = (index / bufferSize) * combinedCanvas.width;
+            const y = (1 - (value + 200) / 400) * combinedCanvas.height;
+            if (index === 0) {
+                combinedCtx.moveTo(x, y);
+            } else {
+                combinedCtx.lineTo(x, y);
+            }
+        });
+        combinedCtx.strokeStyle = 'green';
+        combinedCtx.stroke();
+
+        // Add axes and labels to the plots
+        combinedCtx.beginPath();
+        combinedCtx.moveTo(30, 0);
+        combinedCtx.lineTo(30, combinedCanvas.height);
+        combinedCtx.moveTo(0, combinedCanvas.height - 20);
+        combinedCtx.lineTo(combinedCanvas.width, combinedCanvas.height - 20);
+        combinedCtx.strokeStyle = 'black';
+        combinedCtx.stroke();
+
+        // Add y-axis labels
+        const yLabels = [-200, 0, 200];
+        combinedCtx.font = '12px Arial';
+        combinedCtx.fillStyle = 'black';
+        yLabels.forEach((label, index) => {
+            const y = (1 - (label + 200) / 400) * combinedCanvas.height;
+            combinedCtx.fillText(label, 5, y + 5);
+        });
+        combinedCtx.fillText('Amplitude', 5, 15);
+        combinedCtx.fillText('Time', combinedCanvas.width - 30, combinedCanvas.height - 5);
+    }
+
+    function updateParamsTable() {
+        const omega0 = 2 * Math.PI * bpCenterFrequency * timeStep / 1000;
+        const alpha = Math.sin(omega0) / (2 * qFactor);
+
+        const b0 = alpha;
+        const b1 = 0;
+        const b2 = -alpha;
+        const a0 = 1 + alpha;
+        const a1 = -2 * Math.cos(omega0);
+        const a2 = 1 - alpha;
+
+        paramsBody.innerHTML = `
+            <tr><td>omega0</td><td>${omega0.toFixed(4)}</td></tr>
+            <tr><td>alpha</td><td>${alpha.toFixed(4)}</td></tr>
+            <tr><td>b0</td><td>${b0.toFixed(4)}</td></tr>
+            <tr><td>b1</td><td>${b1.toFixed(4)}</td></tr>
+            <tr><td>b2</td><td>${b2.toFixed(4)}</td></tr>
+            <tr><td>a0</td><td>${a0.toFixed(4)}</td></tr>
+            <tr><td>a1</td><td>${a1.toFixed(4)}</td></tr>
+            <tr><td>a2</td><td>${a2.toFixed(4)}</td></tr>
+        `;
+    }
+
+    function animateBall() {
+        function moveBall() {
+            updateBuffer(); // Update the ring buffer with a new value
+
+            // Apply the band-pass filter to the current buffer value
+            const currentIndex = (writeIndex - 1 + bufferSize) % bufferSize; // Get the latest value index
+            const bpFilteredValue = applyBandPassFilter(buffer[currentIndex], bpCenterFrequency, qFactor);
+
+            // Use the band-pass filter output as the final output
+            let combinedValue = bpFilteredValue;
+            outputSignal.push(combinedValue); // Store the output signal for plotting
+
+            ball.style.top = combinedValue + 'px';
+
+            // Update the step counter
+            stepCounter.textContent = `Step: ${step}`;
+
+            if (step % 100 === 0) {
+                plotSignals(); // Plot the signals after every 100 steps
+                inputSignal = [];
+                outputSignal = [];
+            }
+
+            setTimeout(moveBall, timeStep);
+        }
+
+        moveBall();
+    }
+
+    // Initialize parameters table
+    updateParamsTable();
+
+    // Start the animation
+    animateBall();
+</script>
+
+</body>
+</html>
