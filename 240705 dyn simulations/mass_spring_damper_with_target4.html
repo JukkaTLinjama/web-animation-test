@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nonlinear Modulation with Real-time X-Y Scatter Plot</title>
+    <title>Nonlinear Modulation with CSV File Input and Output</title>
     <style>
         #animatedElement {
             width: 50px;
@@ -49,6 +49,11 @@
             background-color: white;
             border: 1px solid #ccc;
         }
+
+        #progress {
+            margin-top: 10px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -70,21 +75,33 @@
             <input type="range" id="modulationIndex" min="0" max="0.5" step="0.01" value="0.25">
             <span id="modulationIndexValue">0.25</span>
         </div>
+        <div class="slider-container">
+            <label for="fileInput">Load Target Sequence (CSV): </label>
+            <input type="file" id="fileInput">
+        </div>
+        <div class="slider-container">
+            <button id="saveButton">Save Target Sequence to CSV</button>
+        </div>
+        <div id="progress">Time Step: 0 / 0</div>
     </div>
 
     <canvas id="plot" width="400" height="200"></canvas>
 
+    <!-- Add PapaParse for CSV parsing and saving -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+
     <script>
         /*
-         * This script simulates the motion of a mass-spring-damper system with nonlinear modulation.
+         * Script Name: Nonlinear Modulation with CSV File Input and Output
          * 
-         * - The natural frequency of the system is set to 0.5 Hz.
-         * - The spring constant and damping factor are calculated based on this frequency.
-         * - The target position for the mass is modulated by nonlinear amplitude and frequency modulation.
-         * - The modulation is visualized as an x-y scatter plot where x = frequency modulation and y = amplitude modulation.
-         * - Sliders allow interactive control of the amplitude modulation frequency, frequency modulation frequency, and modulation index.
-         * https://chatgpt.com/share/abea9295-a2f6-4932-8c0f-55ed56599027
-         * JukkaTLinjama 20240821    /Users/jukkal2021/Python_dev/graphics/240611 universe scales/240705 dyn simulations/mass_spring_damper_with_target.html
+         * Description:
+         * This script simulates the motion of a mass-spring-damper system with nonlinear modulation.
+         * It allows for loading a target position sequence from a CSV file and saving the sequence
+         * to a CSV file. The script includes real-time visualization of frequency and amplitude modulation
+         * via an x-y scatter plot. Users can interactively control the modulation parameters via sliders.
+         * 
+         * Version ID: 1.4  240822 JLA  mass_spring_damper_with_target4.html
+         * Link to ChatGPT conversation: https://chatgpt.com/share/abea9295-a2f6-4932-8c0f-55ed56599027
          */
 
         // Physics parameters
@@ -111,7 +128,30 @@
         const plotWidth = plotCanvas.width;
         const plotHeight = plotCanvas.height;
 
-        // Generate sequences for X and Y positions
+        // Default sequence
+        let sequenceX = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
+        let sequenceY = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
+
+        const element = document.getElementById('animatedElement');
+        const targetElement = document.getElementById('targetElement');
+        const ampModFreqSlider = document.getElementById('ampModFreq');
+        const freqModFreqSlider = document.getElementById('freqModFreq');
+        const modulationIndexSlider = document.getElementById('modulationIndex');
+        const ampModFreqValue = document.getElementById('ampModFreqValue');
+        const freqModFreqValue = document.getElementById('freqModFreqValue');
+        const modulationIndexValue = document.getElementById('modulationIndexValue');
+        const fileInput = document.getElementById('fileInput');
+        const saveButton = document.getElementById('saveButton');
+        const progressIndicator = document.getElementById('progress');
+
+        let posX = window.innerWidth / 2;
+        let posY = window.innerHeight / 2;
+
+        let velocityX = 0;
+        let velocityY = 0;
+
+        let frame = 0;
+
         function generateSequence(length, dt, ampModFreq, freqModFreq, modulationIndex) {
             const baseFrequency = naturalFrequency; // Match the natural frequency
             const amplitude = 100; // Scaled to 100 pixels for visualization
@@ -130,25 +170,18 @@
             return sequence;
         }
 
-        let sequenceX = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
-        let sequenceY = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
-
-        const element = document.getElementById('animatedElement');
-        const targetElement = document.getElementById('targetElement');
-        const ampModFreqSlider = document.getElementById('ampModFreq');
-        const freqModFreqSlider = document.getElementById('freqModFreq');
-        const modulationIndexSlider = document.getElementById('modulationIndex');
-        const ampModFreqValue = document.getElementById('ampModFreqValue');
-        const freqModFreqValue = document.getElementById('freqModFreqValue');
-        const modulationIndexValue = document.getElementById('modulationIndexValue');
-        
-        let posX = window.innerWidth / 2;
-        let posY = window.innerHeight / 2;
-
-        let velocityX = 0;
-        let velocityY = 0;
-
-        let frame = 0;
+        function reprocessSequence(sequenceX, sequenceY) {
+            return sequenceX.map((x, i) => {
+                const y = sequenceY[i] ? sequenceY[i].value : 0;
+                const modulatedFrequency = naturalFrequency * Math.pow(1 + modulationIndex * Math.sin(2 * Math.PI * freqModFreq * dt * i), 3);
+                const amplitudeModulation = Math.pow(1 + modulationIndex * Math.sin(2 * Math.PI * ampModFreq * dt * i), 3);
+                return {
+                    value: amplitudeModulation * Math.sin(2 * Math.PI * modulatedFrequency * dt * i),
+                    amplitudeModulation: amplitudeModulation,
+                    frequencyModulation: modulatedFrequency
+                };
+            });
+        }
 
         function updateElementPosition(targetX, targetY) {
             // Spring force = -k * displacement
@@ -212,6 +245,9 @@
                 // Draw scatter plot
                 drawPlot(sequenceX[frame].amplitudeModulation, sequenceX[frame].frequencyModulation);
 
+                // Update progress indicator
+                progressIndicator.textContent = `Time Step: ${frame + 1} / ${sequenceLength}`;
+
                 frame++;
                 requestAnimationFrame(animate);
             } else {
@@ -220,6 +256,48 @@
                 sequenceY = generateSequence(sequenceLength, dt, ampModFreq, freqModFreq, modulationIndex);
                 requestAnimationFrame(animate);
             }
+        }
+
+        function loadSequenceFromCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: true,
+                complete: function(results) {
+                    const data = results.data;
+                    if (data && data.length > 0) {
+                        sequenceX = data.map((row, i) => ({ value: row.X }));
+                        sequenceY = data.map((row, i) => ({ value: row.Y }));
+                        sequenceLength = Math.min(sequenceX.length, sequenceY.length);
+                        sequenceX = reprocessSequence(sequenceX, sequenceY);
+                        sequenceY = reprocessSequence(sequenceY, sequenceX); // Reprocess with current modulation settings
+                    }
+                },
+                error: function(err) {
+                    alert('Failed to load sequence from file: ' + err.message);
+                }
+            });
+        }
+
+        function saveSequenceToCSV() {
+            const data = sequenceX.map((x, i) => ({
+                X: x.value,
+                Y: sequenceY[i] ? sequenceY[i].value : 0,
+            }));
+
+            const csv = Papa.unparse(data);
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'target_sequence.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         // Update modulation frequencies and index based on slider input
@@ -237,6 +315,9 @@
             modulationIndex = parseFloat(modulationIndexSlider.value);
             modulationIndexValue.textContent = modulationIndex.toFixed(2);
         });
+
+        fileInput.addEventListener('change', loadSequenceFromCSV);
+        saveButton.addEventListener('click', saveSequenceToCSV);
 
         animate();
     </script>
